@@ -1,0 +1,446 @@
+"""
+GuardianAI Security Scanner
+Integrates multiple security tools and provides AI-powered analysis
+"""
+
+import subprocess
+import json
+import tempfile
+import shutil
+import os
+from pathlib import Path
+from typing import Dict, List, Optional
+from datetime import datetime, timezone
+import git
+import httpx
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+
+class SecurityScanner:
+    """Orchestrates multiple security scanning tools"""
+    
+    def __init__(self, anthropic_api_key: Optional[str] = None):
+        self.anthropic_api_key = anthropic_api_key or os.getenv("ANTHROPIC_API_KEY")
+        self.scan_results = {}
+        self.repo_path = None
+        
+    def clone_repo(self, repo_url: str, branch: str = "main") -> str:
+        """Clone a GitHub repository to temporary directory"""
+        temp_dir = tempfile.mkdtemp(prefix="guardianai_")
+        
+        try:
+            print(f"📥 Cloning {repo_url} (branch: {branch})...")
+            git.Repo.clone_from(repo_url, temp_dir, branch=branch, depth=1)
+            self.repo_path = temp_dir
+            return temp_dir
+        except Exception as e:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise Exception(f"Failed to clone repository: {str(e)}")
+    
+    def scan_all(self, repo_path: str) -> Dict:
+        """Run all security scans"""
+        self.repo_path = repo_path
+        
+        print("🔍 Starting comprehensive security scan...")
+        
+        results = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "repo_path": repo_path,
+            "scans": {
+                "sast": self.run_semgrep(),
+                "secrets": self.run_trufflehog(),
+                "dependencies": self.run_trivy(),
+                "python_security": self.run_bandit(),
+            },
+            "summary": {}
+        }
+        
+        # Calculate summary
+        results["summary"] = self._calculate_summary(results["scans"])
+        
+        self.scan_results = results
+        return results
+    
+    def run_semgrep(self) -> Dict:
+        """Run Semgrep SAST analysis"""
+        print("  → Running Semgrep (SAST)...")
+        
+        try:
+            result = subprocess.run(
+                [
+                    "semgrep",
+                    "--config=auto",  # Use curated rulesets
+                    "--json",
+                    "--quiet",
+                    self.repo_path
+                ],
+                capture_output=True,
+                text=True,
+                timeout=120
+            )
+            
+            data = json.loads(result.stdout) if result.stdout else {}
+            findings = data.get("results", [])
+            
+            return {
+                "tool": "semgrep",
+                "status": "completed",
+                "findings_count": len(findings),
+                "findings": [
+                    {
+                        "severity": f.get("extra", {}).get("severity", "unknown"),
+                        "message": f.get("extra", {}).get("message", ""),
+                        "file": f.get("path", ""),
+                        "line": f.get("start", {}).get("line", 0),
+                        "rule_id": f.get("check_id", ""),
+                    }
+                    for f in findings[:20]  # Limit to top 20
+                ]
+            }
+        except subprocess.TimeoutExpired:
+            return {"tool": "semgrep", "status": "timeout", "findings_count": 0, "findings": []}
+        except Exception as e:
+            return {"tool": "semgrep", "status": "error", "error": str(e), "findings_count": 0, "findings": []}
+    
+    def run_trufflehog(self) -> Dict:
+        """Run TruffleHog secret scanning"""
+        print("  → Running TruffleHog (Secrets)...")
+        
+        try:
+            result = subprocess.run(
+                [
+                    "trufflehog",
+                    "filesystem",
+                    self.repo_path,
+                    "--json",
+                    "--no-update"
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            
+            findings = []
+            for line in result.stdout.strip().split('\n'):
+                if line:
+                    try:
+                        finding = json.loads(line)
+                        findings.append({
+                            "type": finding.get("DetectorName", "unknown"),
+                            "file": finding.get("SourceMetadata", {}).get("Data", {}).get("Filesystem", {}).get("file", ""),
+                            "verified": finding.get("Verified", False),
+                            "raw": finding.get("Raw", "")[:50] + "..." if finding.get("Raw") else ""
+                        })
+                    except json.JSONDecodeError:
+                        continue
+            
+            return {
+                "tool": "trufflehog",
+                "status": "completed",
+                "findings_count": len(findings),
+                "findings": findings[:10]  # Limit to top 10
+            }
+        except subprocess.TimeoutExpired:
+            return {"tool": "trufflehog", "status": "timeout", "findings_count": 0, "findings": []}
+        except Exception as e:
+            return {"tool": "trufflehog", "status": "error", "error": str(e), "findings_count": 0, "findings": []}
+    
+    def run_trivy(self) -> Dict:
+        """Run Trivy for dependencies and container scanning"""
+        print("  → Running Trivy (Dependencies)...")
+        
+        try:
+            result = subprocess.run(
+                [
+                    "trivy",
+                    "fs",
+                    "--format", "json",
+                    "--quiet",
+                    "--severity", "HIGH,CRITICAL",  # Only high/critical
+                    self.repo_path
+                ],
+                capture_output=True,
+                text=True,
+                timeout=120
+            )
+            
+            data = json.loads(result.stdout) if result.stdout else {}
+            
+            all_vulns = []
+            for result_item in data.get("Results", []):
+                for vuln in result_item.get("Vulnerabilities", []):
+                    all_vulns.append({
+                        "cve_id": vuln.get("VulnerabilityID", ""),
+                        "package": vuln.get("PkgName", ""),
+                        "version": vuln.get("InstalledVersion", ""),
+                        "fixed_version": vuln.get("FixedVersion", ""),
+                        "severity": vuln.get("Severity", ""),
+                        "title": vuln.get("Title", "")
+                    })
+            
+            return {
+                "tool": "trivy",
+                "status": "completed",
+                "findings_count": len(all_vulns),
+                "findings": all_vulns[:15]  # Limit to top 15
+            }
+        except subprocess.TimeoutExpired:
+            return {"tool": "trivy", "status": "timeout", "findings_count": 0, "findings": []}
+        except Exception as e:
+            return {"tool": "trivy", "status": "error", "error": str(e), "findings_count": 0, "findings": []}
+    
+    def run_bandit(self) -> Dict:
+        """Run Bandit for Python security issues"""
+        print("  → Running Bandit (Python)...")
+        
+        # Check if there are any Python files
+        py_files = list(Path(self.repo_path).rglob("*.py"))
+        if not py_files:
+            return {
+                "tool": "bandit",
+                "status": "skipped",
+                "reason": "No Python files found",
+                "findings_count": 0,
+                "findings": []
+            }
+        
+        try:
+            result = subprocess.run(
+                [
+                    "bandit",
+                    "-r", self.repo_path,
+                    "-f", "json",
+                    "-ll"  # Only medium and high severity
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            
+            data = json.loads(result.stdout) if result.stdout else {}
+            findings = data.get("results", [])
+            
+            return {
+                "tool": "bandit",
+                "status": "completed",
+                "findings_count": len(findings),
+                "findings": [
+                    {
+                        "severity": f.get("issue_severity", ""),
+                        "confidence": f.get("issue_confidence", ""),
+                        "message": f.get("issue_text", ""),
+                        "file": f.get("filename", ""),
+                        "line": f.get("line_number", 0),
+                        "test_id": f.get("test_id", "")
+                    }
+                    for f in findings[:10]
+                ]
+            }
+        except subprocess.TimeoutExpired:
+            return {"tool": "bandit", "status": "timeout", "findings_count": 0, "findings": []}
+        except Exception as e:
+            return {"tool": "bandit", "status": "error", "error": str(e), "findings_count": 0, "findings": []}
+    
+    def _calculate_summary(self, scans: Dict) -> Dict:
+        """Calculate overall summary statistics"""
+        total_findings = sum(
+            scan.get("findings_count", 0) 
+            for scan in scans.values()
+        )
+        
+        # Count by severity
+        severity_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+        
+        for scan in scans.values():
+            for finding in scan.get("findings", []):
+                severity = finding.get("severity", "").upper()
+                if severity in severity_counts:
+                    severity_counts[severity] += 1
+        
+        # Calculate risk score (0-100)
+        risk_score = min(100, (
+            severity_counts["CRITICAL"] * 20 +
+            severity_counts["HIGH"] * 10 +
+            severity_counts["MEDIUM"] * 5 +
+            severity_counts["LOW"] * 2
+        ))
+        
+        return {
+            "total_findings": total_findings,
+            "by_severity": severity_counts,
+            "risk_score": risk_score,
+            "risk_level": self._get_risk_level(risk_score)
+        }
+    
+    def _get_risk_level(self, score: int) -> str:
+        """Convert risk score to level"""
+        if score >= 80: return "CRITICAL"
+        elif score >= 60: return "HIGH"
+        elif score >= 40: return "MEDIUM"
+        elif score >= 20: return "LOW"
+        else: return "MINIMAL"
+    
+    async def ai_analyze(self, repo_name: str) -> Dict:
+        """Send findings to Claude for AI analysis"""
+        if not self.anthropic_api_key:
+            return {
+                "summary": "AI analysis unavailable (no API key configured)",
+                "recommendations": ["Configure ANTHROPIC_API_KEY to enable AI-powered insights"],
+                "fix_effort_hours": 0
+            }
+        
+        if not self.scan_results:
+            return {
+                "summary": "No scan results available",
+                "recommendations": ["Run security scan first"],
+                "fix_effort_hours": 0
+            }
+        
+        print("🤖 Analyzing with Claude AI...")
+        
+        # Prepare concise findings for AI
+        prompt = f"""Analyze this security scan for {repo_name}:
+
+SUMMARY:
+- Total findings: {self.scan_results['summary']['total_findings']}
+- Critical: {self.scan_results['summary']['by_severity']['CRITICAL']}
+- High: {self.scan_results['summary']['by_severity']['HIGH']}
+- Risk Score: {self.scan_results['summary']['risk_score']}/100
+
+TOP FINDINGS:
+"""
+        
+        # Add sample findings from each tool
+        for tool_name, tool_data in self.scan_results['scans'].items():
+            if tool_data.get('findings'):
+                prompt += f"\n{tool_name.upper()}:\n"
+                for finding in tool_data['findings'][:3]:
+                    prompt += f"  - {finding}\n"
+        
+        prompt += """
+
+Provide:
+1. A 2-sentence executive summary of security posture
+2. Top 3 actionable recommendations (be specific)
+3. Estimated fix effort (hours)
+
+Format as JSON:
+{
+  "summary": "...",
+  "recommendations": ["...", "...", "..."],
+  "fix_effort_hours": 0
+}
+"""
+        
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": self.anthropic_api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": "claude-sonnet-4-20250514",
+                        "max_tokens": 1000,
+                        "messages": [{"role": "user", "content": prompt}]
+                    }
+                )
+                
+                data = response.json()
+                
+                # Handle error response
+                if response.status_code != 200:
+                    print(f"API error: {data}")
+                    return {
+                        "summary": "API error occurred",
+                        "recommendations": ["Check API key and credits"],
+                        "fix_effort_hours": 0
+                    }
+                
+                # Get AI response
+                ai_text = data.get("content", [{}])[0].get("text", "")
+                
+                if not ai_text:
+                    return {
+                        "summary": "Empty API response",
+                        "recommendations": ["Retry analysis"],
+                        "fix_effort_hours": 0
+                    }
+                
+                # Try to parse as JSON
+                try:
+                    return json.loads(ai_text)
+                except:
+                    # Fallback if not valid JSON
+                    lines = ai_text.strip().split('\n')
+                    return {
+                        "summary": lines[0] if lines else "Analysis complete",
+                        "recommendations": [l.strip('- ').strip() for l in lines[1:4] if l.strip()],
+                        "fix_effort_hours": 4
+                    }
+        except Exception as e:
+            print(f"AI analysis error: {e}")
+            return {
+                "summary": "AI analysis failed",
+                "recommendations": ["Check API configuration", "Verify credits available"],
+                "fix_effort_hours": 0
+            }
+    
+    def cleanup(self):
+        """Clean up temporary files"""
+        if self.repo_path and os.path.exists(self.repo_path):
+            shutil.rmtree(self.repo_path, ignore_errors=True)
+
+
+# Convenience function for quick scans
+async def quick_scan(repo_url: str, branch: str = "main") -> Dict:
+    """Run a complete security scan on a repository"""
+    scanner = SecurityScanner()
+    
+    try:
+        # Clone repo
+        repo_path = scanner.clone_repo(repo_url, branch)
+        
+        # Run scans
+        scan_results = scanner.scan_all(repo_path)
+        
+        # AI analysis
+        repo_name = repo_url.split('/')[-1].replace('.git', '')
+        ai_results = await scanner.ai_analyze(repo_name)
+        
+        # Combine results
+        return {
+            **scan_results,
+            "ai_analysis": ai_results
+        }
+    finally:
+        scanner.cleanup()
+
+
+if __name__ == "__main__":
+    # Test the scanner
+    import asyncio
+    
+    async def test():
+        print("🧪 Testing GuardianAI Scanner\n")
+        
+        # Test with a small public repo
+        test_repo = "https://github.com/tiangolo/fastapi"
+        
+        results = await quick_scan(test_repo, branch="master")
+        
+        print("\n" + "="*50)
+        print("📊 SCAN RESULTS")
+        print("="*50)
+        print(json.dumps(results["summary"], indent=2))
+        print(f"\n🤖 AI Analysis: {results['ai_analysis']['summary']}")
+        print("\n💡 Recommendations:")
+        for i, rec in enumerate(results['ai_analysis']['recommendations'], 1):
+            print(f"  {i}. {rec}")
+    
+    asyncio.run(test())

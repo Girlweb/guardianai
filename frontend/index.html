@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GuardianAI - AI Security Co-Pilot for DevOps</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .gradient-text {
+            background: linear-gradient(to right, #a78bfa, #ec4899);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white">
+    
+    <!-- Header -->
+    <header class="border-b border-purple-500/20 p-6">
+        <div class="max-w-6xl mx-auto flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-gradient-to-br from-purple-400 to-pink-600 rounded-lg flex items-center justify-center">
+                    <span class="text-white font-bold text-xl">G</span>
+                </div>
+                <span class="text-2xl font-bold">GuardianAI</span>
+            </div>
+            <button class="px-6 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition">
+                Get Started
+            </button>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <main class="max-w-6xl mx-auto px-6 py-20">
+        <div class="text-center mb-16">
+            <div class="inline-block mb-4 px-4 py-1 bg-purple-500/20 border border-purple-400/30 rounded-full text-purple-300 text-sm">
+                🚀 2026 DevSecOps Pivot
+            </div>
+            
+            <h1 class="text-6xl font-bold mb-6">
+                Stop Assessing.<br>
+                Start <span class="gradient-text">Auto-Remediating</span>.
+            </h1>
+            
+            <p class="text-xl text-gray-300 mb-12 max-w-3xl mx-auto">
+                The market has moved past maturity scores. Investors want <strong>Agentic Security</strong>. 
+                AI that predicts vulnerabilities, generates fixes, and orchestrates your pipeline.
+            </p>
+        </div>
+
+        <!-- Market Stats -->
+        <div class="grid md:grid-cols-4 gap-4 mb-16">
+            <div class="bg-slate-800/50 backdrop-blur border border-purple-500/20 rounded-xl p-6 text-center">
+                <div class="text-4xl font-bold text-purple-400 mb-2">$42B</div>
+                <div class="text-gray-400 text-sm">Market by 2030</div>
+            </div>
+            <div class="bg-slate-800/50 backdrop-blur border border-purple-500/20 rounded-xl p-6 text-center">
+                <div class="text-4xl font-bold text-cyan-400 mb-2">80%</div>
+                <div class="text-gray-400 text-sm">Efficiency via AI</div>
+            </div>
+            <div class="bg-slate-800/50 backdrop-blur border border-purple-500/20 rounded-xl p-6 text-center">
+                <div class="text-4xl font-bold text-pink-400 mb-2">$2.5M</div>
+                <div class="text-gray-400 text-sm">Avg Seed Funding</div>
+            </div>
+            <div class="bg-slate-800/50 backdrop-blur border border-purple-500/20 rounded-xl p-6 text-center">
+                <div class="text-4xl font-bold text-green-400 mb-2">22%</div>
+                <div class="text-gray-400 text-sm">CAGR Growth</div>
+            </div>
+        </div>
+
+        <!-- Scan Input -->
+        <div class="max-w-2xl mx-auto mb-16">
+            <div class="bg-slate-800/50 backdrop-blur border border-purple-500/20 rounded-2xl p-8">
+                <label class="block text-white font-semibold mb-3">
+                    Repository URL
+                </label>
+                
+                <div class="flex gap-3 mb-4">
+                    <input
+                        id="repoUrl"
+                        type="text"
+                        placeholder="https://github.com/your-org/your-repo"
+                        class="flex-1 px-4 py-3 bg-slate-900/50 border border-purple-500/30 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-purple-400"
+                    />
+                    <button
+                        onclick="scanRepo()"
+                        id="scanBtn"
+                        class="px-8 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-semibold rounded-lg transition"
+                    >
+                        Scan Now
+                    </button>
+                </div>
+
+                <button
+                    onclick="loadDemo()"
+                    class="text-purple-400 hover:text-purple-300 text-sm transition"
+                >
+                    or try a demo scan →
+                </button>
+
+                <div id="error" class="hidden mt-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm"></div>
+            </div>
+        </div>
+
+        <!-- Results Section -->
+        <div id="results" class="hidden max-w-4xl mx-auto">
+            <div class="bg-slate-800/50 backdrop-blur border border-purple-500/20 rounded-2xl p-8 mb-6">
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-2xl font-bold">Scan Results</h2>
+                    <span id="status" class="px-4 py-1 bg-green-500/20 border border-green-400/30 rounded-full text-green-300 text-sm">
+                        ✓ completed
+                    </span>
+                </div>
+
+                <!-- Metrics -->
+                <div class="grid grid-cols-3 gap-4 mb-8">
+                    <div class="bg-slate-900/50 rounded-xl p-4 text-center">
+                        <div id="score" class="text-4xl font-bold text-purple-400 mb-2">--</div>
+                        <div class="text-gray-400 text-sm">Maturity Score</div>
+                    </div>
+                    
+                    <div class="bg-slate-900/50 rounded-xl p-4 text-center">
+                        <div id="level" class="text-4xl font-bold text-cyan-400 mb-2">--</div>
+                        <div class="text-gray-400 text-sm">Maturity Tier</div>
+                    </div>
+                    
+                    <div class="bg-slate-900/50 rounded-xl p-4 text-center">
+                        <div id="time" class="text-4xl font-bold text-pink-400 mb-2">--</div>
+                        <div class="text-gray-400 text-sm">Analysis Time</div>
+                    </div>
+                </div>
+
+                <!-- AI Summary -->
+                <div class="mb-6 p-4 bg-purple-500/10 border border-purple-400/30 rounded-lg">
+                    <div class="flex items-start gap-3">
+                        <span class="text-2xl">🤖</span>
+                        <div>
+                            <div class="font-semibold text-purple-300 mb-1">AI Analysis</div>
+                            <p id="aiSummary" class="text-gray-300">Loading...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recommendations -->
+                <div>
+                    <h3 class="text-lg font-semibold text-white mb-3">Top Recommendations</h3>
+                    <div id="recommendations" class="space-y-2">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Features -->
+        <div id="features" class="grid md:grid-cols-3 gap-6 mt-20">
+            <div class="bg-slate-800/30 backdrop-blur border border-purple-500/20 rounded-xl p-6">
+                <div class="text-4xl mb-4">🤖</div>
+                <h3 class="text-xl font-bold text-white mb-2">AI Predictor</h3>
+                <p class="text-gray-400">
+                    Claude analyzes your pipeline and predicts vulnerabilities before they become incidents.
+                </p>
+            </div>
+
+            <div class="bg-slate-800/30 backdrop-blur border border-purple-500/20 rounded-xl p-6">
+                <div class="text-4xl mb-4">⚡</div>
+                <h3 class="text-xl font-bold text-white mb-2">Auto-Remediation</h3>
+                <p class="text-gray-400">
+                    Generates pull requests with verified fixes. Review and merge in seconds, not hours.
+                </p>
+            </div>
+
+            <div class="bg-slate-800/30 backdrop-blur border border-purple-500/20 rounded-xl p-6">
+                <div class="text-4xl mb-4">🔗</div>
+                <h3 class="text-xl font-bold text-white mb-2">Workflow Orchestration</h3>
+                <p class="text-gray-400">
+                    n8n-powered workflows connect to Slack, Jira, GitHub with zero code required.
+                </p>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-purple-500/20 mt-20 py-8">
+        <div class="max-w-6xl mx-auto px-6 text-center text-gray-500 text-sm">
+            © 2026 GuardianAI Platform • Built by Mitchele Jebet • Powered by Claude & n8n
+        </div>
+    </footer>
+
+    <script>
+        async function scanRepo() {
+            const repoUrl = document.getElementById('repoUrl').value;
+            const scanBtn = document.getElementById('scanBtn');
+            const errorDiv = document.getElementById('error');
+            
+            if (!repoUrl) {
+                showError('Please enter a repository URL');
+                return;
+            }
+
+            scanBtn.textContent = 'Scanning...';
+            scanBtn.disabled = true;
+            errorDiv.classList.add('hidden');
+            document.getElementById('features').classList.add('hidden');
+
+            try {
+                const response = await fetch('http://localhost:8001/scan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        repo_url: repoUrl,
+                        scan_type: 'quick'
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                displayResults(data);
+            } catch (error) {
+                showError('Failed to scan. Make sure backend is running on port 8000');
+                console.error('Scan error:', error);
+            } finally {
+                scanBtn.textContent = 'Scan Now';
+                scanBtn.disabled = false;
+            }
+        }
+
+        async function loadDemo() {
+            document.getElementById('scanBtn').textContent = 'Loading...';
+            document.getElementById('scanBtn').disabled = true;
+            document.getElementById('features').classList.add('hidden');
+
+            try {
+                const response = await fetch('http://localhost:8001/demo');
+                const data = await response.json();
+                document.getElementById('repoUrl').value = 'https://github.com/demo/project';
+                displayResults(data);
+            } catch (error) {
+                showError('Failed to load demo. Make sure backend is running.');
+            } finally {
+                document.getElementById('scanBtn').textContent = 'Scan Now';
+                document.getElementById('scanBtn').disabled = false;
+            }
+        }
+
+        function displayResults(data) {
+            document.getElementById('results').classList.remove('hidden');
+            document.getElementById('score').textContent = data.maturity_score + '%';
+            document.getElementById('level').textContent = data.maturity_level.split(':')[0];
+            document.getElementById('time').textContent = data.scan_time + 's';
+            document.getElementById('aiSummary').textContent = data.ai_summary;
+
+            const recsDiv = document.getElementById('recommendations');
+            recsDiv.innerHTML = data.recommendations.map((rec, idx) => `
+                <div class="flex items-start gap-3 p-3 bg-slate-900/30 rounded-lg">
+                    <span class="text-purple-400 font-bold">${idx + 1}.</span>
+                    <span class="text-gray-300">${rec}</span>
+                </div>
+            `).join('');
+
+            // Scroll to results
+            document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = message;
+            errorDiv.classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>
