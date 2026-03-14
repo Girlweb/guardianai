@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime, timezone
 import re
+from logging_system import GuardianAILoggingSystem
 
 import git
 import httpx
@@ -42,7 +43,7 @@ class SecurityScanner:
         """Clone a GitHub repository to temporary directory"""
         temp_dir = tempfile.mkdtemp(prefix="guardianai_")
         try:
-            print(f"📥 Cloning {repo_url} (branch: {branch})...")
+            print(f" Cloning {repo_url} (branch: {branch})...")
             git.Repo.clone_from(repo_url, temp_dir, branch=branch, depth=1)
             self.repo_path = temp_dir
             
@@ -50,9 +51,9 @@ class SecurityScanner:
             self.environment = self.detect_environment(temp_dir)
             self.public_endpoints = self.detect_public_endpoints(temp_dir)
             
-            print(f"🔍 Environment detected: {self.environment}")
+            print(f" Environment detected: {self.environment}")
             if self.public_endpoints:
-                print(f"🌐 Public endpoints found: {len(self.public_endpoints)}")
+                print(f" Public endpoints found: {len(self.public_endpoints)}")
             
             return temp_dir
         except Exception as e:
@@ -163,7 +164,7 @@ class SecurityScanner:
     def scan_all(self, repo_path: str) -> Dict:
         """Run all security scans with context awareness"""
         self.repo_path = repo_path
-        print("🔍 Starting comprehensive security scan...\n")
+        print(" Starting comprehensive security scan...\n")
         
         results = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -460,7 +461,7 @@ class SecurityScanner:
                 "fix_effort_hours": 0
             }
         
-        print("🤖 Analyzing with Claude AI...")
+        print(" Analyzing with Claude AI...")
         
         # Prepare context-rich prompt for developer-friendly fixes
         prompt = f"""You are a security engineer explaining findings to a developer who needs to fix them quickly.
@@ -603,13 +604,13 @@ if __name__ == "__main__":
     import asyncio
     
     async def test():
-        print("🧪 Testing GuardianAI Scanner v2.0\n")
+        print(" Testing GuardianAI Scanner v2.0\n")
         print("Features:")
-        print("  ✅ Production vs Staging detection")
-        print("  ✅ TruffleHog secret verification")
-        print("  ✅ Public endpoint detection")
-        print("  ✅ Context-aware severity adjustment")
-        print("  ✅ Developer-friendly AI recommendations\n")
+        print("   Production vs Staging detection")
+        print("   TruffleHog secret verification")
+        print("   Public endpoint detection")
+        print("   Context-aware severity adjustment")
+        print("   Developer-friendly AI recommendations\n")
         
         # Test with a small public repo
         test_repo = "https://github.com/tiangolo/fastapi"
@@ -617,18 +618,72 @@ if __name__ == "__main__":
         results = await quick_scan(test_repo, branch="master")
         
         print("\n" + "="*50)
-        print("📊 SCAN RESULTS")
+        print(" SCAN RESULTS")
         print("="*50)
         print(f"Environment: {results['environment']}")
         print(f"Public endpoints: {results.get('public_endpoints_count', 0)}")
         print(json.dumps(results["summary"], indent=2))
         
-        print(f"\n🤖 AI Analysis: {results['ai_analysis']['summary']}")
+        print(f"\n AI Analysis: {results['ai_analysis']['summary']}")
         
-        print("\n💡 Top Recommendations:")
+        print("\n Top Recommendations:")
         for i, rec in enumerate(results['ai_analysis']['recommendations'][:3], 1):
             print(f"  {i}. {rec}")
         
-        print(f"\n⏱️  Estimated fix time: {results['ai_analysis'].get('fix_effort_hours', 'N/A')} hours")
+        print(f"\n Estimated fix time: {results['ai_analysis'].get('fix_effort_hours', 'N/A')} hours")
     
     asyncio.run(test())
+
+
+# ─── LOGGED SCAN (use this instead of quick_scan for production) ───────────────
+
+async def logged_scan(repo_url: str, branch: str = "main", user_id: str = "system") -> Dict:
+    """quick_scan with automatic SOC2-compliant logging"""
+    from logging_system import GuardianAILoggingSystem
+    import uuid
+
+    logger = GuardianAILoggingSystem()
+    scan_id = str(uuid.uuid4())
+
+    results = await quick_scan(repo_url, branch)
+
+    logger.log_scan_event(
+        scan_id=scan_id,
+        repo_url=repo_url,
+        user_id=user_id,
+        results=results
+    )
+
+    for tool_data in results.get("scans", {}).values():
+        for finding in tool_data.get("findings", []):
+            logger.log_finding_detected(finding, scan_id)
+
+    results["scan_id"] = scan_id
+    results["logged"] = True
+    return results
+
+
+async def logged_scan(repo_url: str, branch: str = "main", user_id: str = "system") -> Dict:
+    """quick_scan with automatic SOC2-compliant logging"""
+    from logging_system import GuardianAILoggingSystem
+    import uuid
+
+    logger = GuardianAILoggingSystem()
+    scan_id = str(uuid.uuid4())
+
+    results = await quick_scan(repo_url, branch)
+
+    logger.log_scan_event(
+        scan_id=scan_id,
+        repo_url=repo_url,
+        user_id=user_id,
+        results=results
+    )
+
+    for tool_data in results.get("scans", {}).values():
+        for finding in tool_data.get("findings", []):
+            logger.log_finding_detected(finding, scan_id)
+
+    results["scan_id"] = scan_id
+    results["logged"] = True
+    return results
