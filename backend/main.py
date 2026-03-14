@@ -3,7 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl
 from typing import Optional, List, Dict, Any
 import os
-from datetime import datetime
+from dotenv import load_dotenv
+load_dotenv()
+import time
 
 app = FastAPI(title="GuardianAI API")
 
@@ -20,20 +22,9 @@ class ScanRequest(BaseModel):
     branch: str = "main"
     scan_type: str = "quick"
 
-class ScanResult(BaseModel):
-    scan_id: str
-    repo_url: str
-    status: str
-    maturity_score: int
-    maturity_level: str
-    scan_time: float
-    findings: Dict[str, Any]
-    ai_summary: str
-    recommendations: List[str]
-
 @app.get("/")
 def root():
-    return {"service": "GuardianAI API", "status": "operational"}
+    return {"service": "GuardianAI API", "version": "2.0", "status": "operational"}
 
 @app.get("/health")
 def health():
@@ -51,9 +42,21 @@ def demo_scan():
         "maturity_score": 78,
         "maturity_level": "Level 4: Managed",
         "scan_time": 2.3,
+        "risk_score": 22,
+        "adjusted_risk_score": 29,
+        "isolation_level": "MEDIUM",
         "findings": {
-            "sast": [{"tool": "Semgrep", "status": "pass", "findings_count": 5}],
-            "secrets": [{"tool": "TruffleHog", "status": "pass", "findings_count": 0}]
+            "dependencies": {"findings_count": 6, "findings": []},
+            "secrets": {"findings_count": 0, "findings": []}
+        },
+        "runtime_context": {
+            "docker": {"has_dockerfile": True, "runs_as_root": False},
+            "microsegmentation": {
+                "isolation_score": 70,
+                "isolation_level": "MEDIUM",
+                "issues": ["No Kubernetes NetworkPolicy"],
+                "risk_multiplier": 1.3
+            }
         },
         "ai_summary": "Repository shows strong security posture with minor gaps.",
         "recommendations": [
@@ -65,39 +68,43 @@ def demo_scan():
 
 @app.post("/scan")
 async def scan_repository(request: ScanRequest):
-    from scanner import SecurityScanner
-    import time
-    
+    from scanner import logged_scan_v2
+
     start = time.time()
-    scanner = SecurityScanner()
-    
-    try:
-        repo_path = scanner.clone_repo(str(request.repo_url), request.branch)
-        results = scanner.scan_all(repo_path)
-        repo_name = str(request.repo_url).split('/')[-1].replace('.git', '')
-        ai_results = await scanner.ai_analyze(repo_name)
-        
-        score = max(0, 100 - results["summary"]["risk_score"])
-        
-        if score >= 90: level = "Level 5: Optimized"
-        elif score >= 75: level = "Level 4: Managed"
-        elif score >= 60: level = "Level 3: Defined"
-        elif score >= 40: level = "Level 2: Repeatable"
-        else: level = "Level 1: Initial"
-        
-        return ScanResult(
-            scan_id=f"scan_{int(time.time())}",
-            repo_url=str(request.repo_url),
-            status="completed",
-            maturity_score=score,
-            maturity_level=level,
-            scan_time=round(time.time() - start, 2),
-            findings=results["scans"],
-            ai_summary=ai_results.get("summary", "Analysis complete"),
-            recommendations=ai_results.get("recommendations", [])
-        )
-    finally:
-        scanner.cleanup()
+
+    results = await logged_scan_v2(
+        repo_url=str(request.repo_url),
+        branch=request.branch,
+        user_id="api"
+    )
+
+    risk_score = results["summary"]["risk_score"]
+    adjusted = results["summary"].get("adjusted_risk_score", risk_score)
+    maturity_score = max(0, 100 - adjusted)
+
+    if maturity_score >= 90: level = "Level 5: Optimized"
+    elif maturity_score >= 75: level = "Level 4: Managed"
+    elif maturity_score >= 60: level = "Level 3: Defined"
+    elif maturity_score >= 40: level = "Level 2: Repeatable"
+    else: level = "Level 1: Initial"
+
+    ai = results.get("ai_analysis", {})
+
+    return {
+        "scan_id": results.get("scan_id"),
+        "repo_url": str(request.repo_url),
+        "status": "completed",
+        "maturity_score": maturity_score,
+        "maturity_level": level,
+        "scan_time": round(time.time() - start, 2),
+        "risk_score": risk_score,
+        "adjusted_risk_score": adjusted,
+        "isolation_level": results["summary"].get("isolation_level", "UNKNOWN"),
+        "findings": results["scans"],
+        "runtime_context": results.get("runtime_context", {}),
+        "ai_summary": ai.get("summary", "Analysis complete"),
+        "recommendations": ai.get("recommendations", [])
+    }
 
 if __name__ == "__main__":
     import uvicorn
