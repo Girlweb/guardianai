@@ -687,3 +687,193 @@ async def logged_scan(repo_url: str, branch: str = "main", user_id: str = "syste
     results["scan_id"] = scan_id
     results["logged"] = True
     return results
+
+
+# ─── PHASE 2: RUNTIME CONTEXT DETECTION ──────────────────────────────────────
+
+def detect_docker_context(repo_path: str) -> Dict:
+    """Detect Docker/container configuration and security posture"""
+    context = {
+        "has_dockerfile": False,
+        "has_compose": False,
+        "runs_as_root": False,
+        "exposes_ports": [],
+        "uses_secrets": False,
+        "network_mode": "unknown"
+    }
+
+    # Check Dockerfile
+    for df in Path(repo_path).rglob("Dockerfile*"):
+        try:
+            content = open(df, encoding="utf-8", errors="ignore").read()
+            context["has_dockerfile"] = True
+
+            if "USER root" in content or ("USER" not in content and "FROM" in content):
+                context["runs_as_root"] = True
+
+            ports = re.findall(r"EXPOSE\s+(\d+)", content)
+            context["exposes_ports"].extend(ports)
+
+            if "secret" in content.lower() or "password" in content.lower():
+                context["uses_secrets"] = True
+        except:
+            pass
+
+    # Check docker-compose
+    for cf in Path(repo_path).rglob("docker-compose*.yml"):
+        try:
+            content = open(cf, encoding="utf-8", errors="ignore").read()
+            context["has_compose"] = True
+
+            if "network_mode: host" in content:
+                context["network_mode"] = "host"
+            elif "networks:" in content:
+                context["network_mode"] = "custom"
+            else:
+                context["network_mode"] = "bridge"
+        except:
+            pass
+
+    return context
+
+
+def detect_kubernetes_context(repo_path: str) -> Dict:
+    """Detect Kubernetes manifests and security posture"""
+    context = {
+        "has_k8s": False,
+        "has_network_policy": False,
+        "has_pod_security": False,
+        "exposed_services": [],
+        "runs_privileged": False
+    }
+
+    k8s_patterns = ["*.yaml", "*.yml"]
+    for pattern in k8s_patterns:
+        for f in Path(repo_path).rglob(pattern):
+            try:
+                content = open(f, encoding="utf-8", errors="ignore").read()
+
+                if "apiVersion" not in content:
+                    continue
+
+                context["has_k8s"] = True
+
+                if "kind: NetworkPolicy" in content:
+                    context["has_network_policy"] = True
+
+                if "kind: PodSecurityPolicy" in content or "securityContext" in content:
+                    context["has_pod_security"] = True
+
+                if "privileged: true" in content:
+                    context["runs_privileged"] = True
+
+                if "type: LoadBalancer" in content or "type: NodePort" in content:
+                    names = re.findall(r"name:\s+(\S+)", content)
+                    context["exposed_services"].extend(names[:3])
+            except:
+                pass
+
+    return context
+
+
+def calculate_microsegmentation_score(docker_ctx: Dict, k8s_ctx: Dict, public_endpoints: List) -> Dict:
+    """
+    Calculate network isolation score based on microsegmentation principles.
+    Higher isolation = lower risk multiplier.
+    """
+    score = 100
+    issues = []
+
+    if docker_ctx.get("network_mode") == "host":
+        score -= 40
+        issues.append("Docker host networking - no isolation")
+
+    if docker_ctx.get("runs_as_root"):
+        score -= 20
+        issues.append("Container runs as root")
+
+    if k8s_ctx.get("has_k8s") and not k8s_ctx.get("has_network_policy"):
+        score -= 30
+        issues.append("No Kubernetes NetworkPolicy - all pods can communicate")
+
+    if k8s_ctx.get("runs_privileged"):
+        score -= 25
+        issues.append("Privileged pod - can escape container")
+
+    if len(public_endpoints) > 0:
+        score -= 15
+        issues.append(f"{len(public_endpoints)} publicly exposed endpoints")
+
+    if k8s_ctx.get("exposed_services"):
+        score -= 10
+        issues.append(f"{len(k8s_ctx['exposed_services'])} LoadBalancer/NodePort services")
+
+    score = max(0, score)
+
+    if score >= 80:
+        level = "HIGH"
+        risk_multiplier = 1.0
+    elif score >= 60:
+        level = "MEDIUM"
+        risk_multiplier = 1.3
+    elif score >= 40:
+        level = "LOW"
+        risk_multiplier = 1.6
+    else:
+        level = "CRITICAL"
+        risk_multiplier = 2.0
+
+    return {
+        "isolation_score": score,
+        "isolation_level": level,
+        "risk_multiplier": risk_multiplier,
+        "issues": issues,
+        "recommendation": "Add NetworkPolicy" if k8s_ctx.get("has_k8s") and not k8s_ctx.get("has_network_policy") else "Improve container isolation"
+    }
+
+
+async def logged_scan_v2(repo_url: str, branch: str = "main", user_id: str = "system") -> Dict:
+    """Full scan with logging + runtime context + microsegmentation scoring"""
+    from logging_system import GuardianAILoggingSystem
+    import uuid
+
+    logger = GuardianAILoggingSystem()
+    scan_id = str(uuid.uuid4())
+
+    results = await quick_scan(repo_url, branch)
+
+    # Phase 2: Runtime context
+    repo_path = tempfile.mkdtemp(prefix="guardianai_ctx_")
+    try:
+        git.Repo.clone_from(repo_url, repo_path, branch=branch, depth=1)
+        docker_ctx = detect_docker_context(repo_path)
+        k8s_ctx = detect_kubernetes_context(repo_path)
+        micro_score = calculate_microsegmentation_score(
+            docker_ctx, k8s_ctx,
+            results.get("public_endpoints_count", 0) * ["exposed"]
+        )
+    finally:
+        shutil.rmtree(repo_path, ignore_errors=True)
+
+    results["runtime_context"] = {
+        "docker": docker_ctx,
+        "kubernetes": k8s_ctx,
+        "microsegmentation": micro_score
+    }
+
+    # Adjust final risk score by multiplier
+    base_score = results["summary"]["risk_score"]
+    adjusted = min(100, int(base_score * micro_score["risk_multiplier"]))
+    results["summary"]["adjusted_risk_score"] = adjusted
+    results["summary"]["isolation_level"] = micro_score["isolation_level"]
+
+    # Log everything
+    logger.log_scan_event(scan_id=scan_id, repo_url=repo_url, user_id=user_id, results=results)
+
+    for tool_data in results.get("scans", {}).values():
+        for finding in tool_data.get("findings", []):
+            logger.log_finding_detected(finding, scan_id)
+
+    results["scan_id"] = scan_id
+    results["logged"] = True
+    return results
