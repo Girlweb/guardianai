@@ -109,3 +109,49 @@ async def scan_repository(request: ScanRequest):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8001)
+
+
+@app.post("/scan/remediate")
+async def scan_and_remediate(request: ScanRequest):
+    from scanner import logged_scan_v2
+    from remediator import remediate_scan
+    import time
+
+    start = time.time()
+
+    results = await logged_scan_v2(
+        repo_url=str(request.repo_url),
+        branch=request.branch,
+        user_id="api"
+    )
+
+    remediation = await remediate_scan(results)
+
+    risk_score = results["summary"]["risk_score"]
+    adjusted = results["summary"].get("adjusted_risk_score", risk_score)
+    maturity_score = max(0, 100 - adjusted)
+
+    if maturity_score >= 90: level = "Level 5: Optimized"
+    elif maturity_score >= 75: level = "Level 4: Managed"
+    elif maturity_score >= 60: level = "Level 3: Defined"
+    elif maturity_score >= 40: level = "Level 2: Repeatable"
+    else: level = "Level 1: Initial"
+
+    ai = results.get("ai_analysis", {})
+
+    return {
+        "scan_id": results.get("scan_id"),
+        "repo_url": str(request.repo_url),
+        "status": "completed",
+        "maturity_score": maturity_score,
+        "maturity_level": level,
+        "scan_time": round(time.time() - start, 2),
+        "risk_score": risk_score,
+        "adjusted_risk_score": adjusted,
+        "isolation_level": results["summary"].get("isolation_level"),
+        "findings": results["scans"],
+        "runtime_context": results.get("runtime_context", {}),
+        "ai_summary": ai.get("summary", "Analysis complete"),
+        "recommendations": ai.get("recommendations", []),
+        "remediation": remediation
+    }
